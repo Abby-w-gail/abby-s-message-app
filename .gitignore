@@ -1,0 +1,6 @@
+local.db
+__pycache__/
+build/
+dist/
+*.spec
+build.bat

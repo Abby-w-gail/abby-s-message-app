@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>abby's chatroom(s)</title>
+<link rel="icon" href="/static/icon.png">
+<link rel="stylesheet" href="/static/98.css">
+<style>
+/* css starts here */
+html, body { height: 100%; }
+body { background: #f4a6c8; margin: 0; overflow: hidden; font-family: "MS UI Gothic", sans-serif; }
+#app { position: absolute; width: 780px; height: 780px; padding: 8px; box-sizing: border-box; display: flex; }  /* always a square */
+.window { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.window-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.title-bar { background: #c2185b; }  /* flat pink title bar */
+.title-bar.inactive { background: #808080; }
+.toolbar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.pink { background: #ffb6d9 !important; }  /* pink buttons like original */
+
+/* chat log styles here */
+#log { flex: 1; min-height: 0; overflow-y: auto; background: #fff; padding: 6px;
+       font-family: "MS Gothic", monospace; font-size: 13px; }
+.line { display: flex; align-items: flex-start; gap: 6px; margin: 3px 0; }
+.time { color: #000; white-space: nowrap; }
+.avatar { width: 20px; height: 20px; flex: none; display: grid; place-items: center;
+          color: #fff; font-size: 11px; border: 1px solid #808080; }
+.sys { color: #808080; }
+.sys.blue { color: #0000aa; }
+.sys.green { color: #008000; }
+.chatimg { display: block; max-width: 220px; max-height: 220px; margin: 4px 0 4px 26px; border: 1px solid #808080; }
+
+/* bottom pink panel here */
+.panel { background: #ffd6ea; padding: 8px; margin-top: 6px; }
+.row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+#name { width: 110px; }
+#color { width: 70px; }
+#swatch { width: 16px; height: 16px; border: 1px solid #808080; display: inline-block; }
+#color.bad { background: #ffd0d0; }  /* invalid colour shows red */
+#pending { display: flex; align-items: center; gap: 6px; min-height: 0; }
+#pending img { max-height: 40px; max-width: 80px; border: 1px solid #808080; }
+#text { width: 100%; height: 50px; resize: none; box-sizing: border-box; }
+.row .right { margin-left: auto; display: flex; gap: 4px; }
+#rooms li { cursor: pointer; padding: 2px 4px; }
+#rooms li:hover { background: #c2185b; color: #fff; }
+#browser { position: absolute; top: 110px; left: 50%; transform: translateX(-50%); width: 260px; display: none; }
+/* css ends here */
+</style>
+</head>
+<body>
+
+<div id="app">
+<!-- main window starts here -->
+<div class="window">
+  <div class="title-bar">
+    <div class="title-bar-text" id="title">abby's chatroom(s) - not in a room</div>
+    <div class="title-bar-controls"><button aria-label="Minimize"></button><button aria-label="Close"></button></div>
+  </div>
+  <div class="window-body">
+
+    <!-- top toolbar buttons here -->
+    <div class="toolbar">
+      <button id="btnCreate">Create room</button>
+      <button id="btnJoin">Join</button>
+      <button id="btnBrowse">Browse server</button>
+      <button id="btnLeave" class="pink">Leave</button>
+      <button id="count" disabled>Users [ 0 ]</button>
+    </div>
+
+    <div id="log" class="sunken-panel"></div>
+
+    <!-- bottom input panel here -->
+    <div class="panel">
+      <div class="row">
+        <label for="name">Name</label><input id="name" maxlength="20" value="Anonymous">
+        <label for="color">Colour</label><input id="color" maxlength="7" value="000000"><span id="swatch"></span>
+        <button id="btnUpload">Attach image</button>
+        <button id="btnClear">Clear</button>
+        <input type="file" id="file" accept="image/*" hidden>
+      </div>
+      <textarea id="text" placeholder="type a message, enter sends"></textarea>
+      <div class="row">
+        <input type="checkbox" id="remember"><label for="remember">Remember me</label>
+        <span class="right">
+          <button id="btnSend" class="pink">Send</button>
+        </span>
+      </div>
+      <div id="pending" class="sys"></div>
+    </div>
+  </div>
+</div>
+<!-- main window ends here -->
+
+<!-- room browser popup here -->
+<div class="window" id="browser">
+  <div class="title-bar">
+    <div class="title-bar-text">Rooms on server</div>
+    <div class="title-bar-controls"><button aria-label="Close" id="closeBrowser"></button></div>
+  </div>
+  <div class="window-body">
+    <ul class="tree-view" id="rooms"></ul>
+  </div>
+</div>
+</div>
+
+<script>
+// setup and helpers start here
+const $ = id => document.getElementById(id);
+const log = $("log");
+let ws, room = null, pendingImg = null;
+
+function stamp(t) {  // makes [10/25 15:53] format
+  const d = t ? new Date(t * 1000) : new Date();
+  const p = n => String(n).padStart(2, "0");
+  return `[${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}]`;
+}
+
+function scrollDown() { log.scrollTop = log.scrollHeight; }
+
+function sys(text, cls = "") {  // grey blue green system lines
+  const div = document.createElement("div");
+  div.className = "sys " + cls;
+  div.textContent = `--- ${text} ---`;
+  log.appendChild(div);
+  scrollDown();
+}
+// setup and helpers end here
+
+// message drawing starts here
+function avatarColor(name) {  // same name, same avatar colour
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.codePointAt(0)) % 360;
+  return `hsl(${h}, 60%, 60%)`;
+}
+
+function drawMsg(m) {
+  const line = document.createElement("div");
+  line.className = "line";
+
+  const time = document.createElement("span");
+  time.className = "time";
+  time.textContent = stamp(m.time);
+
+  const av = document.createElement("span");
+  av.className = "avatar";
+  av.style.background = avatarColor(m.name);
+  av.textContent = [...m.name][0];
+
+  const who = document.createElement("span");
+  const body = document.createElement("span");
+  // textcontent stops html injection
+  if (m.text) {
+    who.textContent = `${m.name}: `;
+    body.textContent = m.text;
+  } else {
+    who.textContent = `${m.name} sent an image:`;  // image only message
+  }
+
+  const words = document.createElement("span");
+  words.style.color = "#" + m.color;  // colours name and text
+  words.append(who, body);
+  line.append(time, av, words);
+  log.appendChild(line);
+
+  if (m.id) {  // images load from server
+    const img = document.createElement("img");
+    img.className = "chatimg";
+    img.src = "/img/" + m.id;
+    img.onload = scrollDown;
+    log.appendChild(img);
+  }
+  scrollDown();
+}
+// message drawing ends here
+
+// websocket connection starts here
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => sys("connected to server");
+  ws.onclose = () => { sys("disconnected, retrying..."); room = null; setTimeout(connect, 2000); };
+  ws.onmessage = e => handle(JSON.parse(e.data));
+}
+
+function send(obj) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+}
+
+function handle(d) {  // server messages handled here
+  if (d.type === "joined") {
+    room = d.room;
+    log.innerHTML = "";
+    sys(`connecting to 「${room}」...`);
+    if (d.created) sys(`room created! code: ${room}`, "blue");
+    sys(`connected! room: '${room}'`, "green");
+    d.history.forEach(drawMsg);
+    $("title").textContent = `abby's chatroom(s) - room: ${room}`;
+  } else if (d.type === "left") {
+    sys("you left the room");
+    $("title").textContent = "abby's chatroom(s) - not in a room";
+    $("count").textContent = "Users [ 0 ]";
+  } else if (d.type === "count") {
+    $("count").textContent = `Users [ ${d.n} ]`;
+  } else if (d.type === "rooms") {
+    showRooms(d.rooms);
+  } else if (d.type === "system") {
+    sys(d.text);
+  } else if (d.type === "msg" || d.type === "img") {
+    drawMsg(d);
+  }
+}
+// websocket connection ends here
+
+// buttons and inputs start here
+function me() {
+  let color = $("color").value.trim().replace("#", "");
+  if (color.length === 3) color = [...color].map(c => c + c).join("");  // short hex works too
+  return { name: $("name").value.trim() || "Anonymous", color };
+}
+
+let sending = false;  // stops double sends
+
+async function sendText() {  // text and image together
+  const text = $("text").value.trim();
+  if (!room) return sys("join a room first");
+  if (!text && !pendingImg) return;
+  if (sending) return;
+  sending = true;
+  let id = "";
+  try {
+    if (pendingImg) {  // upload image first, then send
+      const form = new FormData();
+      form.append("file", pendingImg);
+      const res = await fetch("/upload", { method: "POST", body: form });
+      const out = await res.json();
+      if (out.error) return sys(out.error);
+      id = out.id;  // only id goes through socket
+    }
+    send({ type: "msg", text, id, ...me() });
+    $("text").value = "";
+    clearImg();
+    saveMe();
+  } catch {
+    sys("send failed, try again");
+  } finally {
+    sending = false;
+  }
+}
+
+$("btnCreate").onclick = () => send({ type: "create" });
+$("btnJoin").onclick = () => {
+  const code = prompt("room code?");
+  if (code) send({ type: "join", room: code });
+};
+$("btnLeave").onclick = () => { if (room) { send({ type: "leave" }); room = null; } };
+$("btnSend").onclick = sendText;
+$("text").onkeydown = e => {  // enter sends, shift newline
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendText(); }
+};
+function clearImg() {  // removes attached image
+  pendingImg = null;
+  $("file").value = "";
+  $("pending").innerHTML = "";
+}
+$("btnClear").onclick = clearImg;
+
+// colour preview starts here
+function showColor() {
+  const c = me().color;
+  const ok = /^[0-9a-fA-F]{6}$/.test(c);
+  $("color").classList.toggle("bad", !ok);
+  $("swatch").style.background = ok ? "#" + c : "#fff";
+  $("text").style.color = ok ? "#" + c : "#000";  // typing box shows colour
+}
+$("color").oninput = showColor;
+// colour preview ends here
+// buttons and inputs end here
+
+// image upload starts here
+$("btnUpload").onclick = () => $("file").click();
+$("file").onchange = () => {  // shows small preview thumbnail
+  pendingImg = $("file").files[0] || null;
+  const box = $("pending");
+  box.innerHTML = "";
+  if (!pendingImg) return;
+  const img = document.createElement("img");
+  img.src = URL.createObjectURL(pendingImg);
+  const label = document.createElement("span");
+  label.textContent = `attached: ${pendingImg.name} (clear removes)`;
+  box.append(img, label);
+};
+// image upload ends here
+
+// room browser starts here
+$("btnBrowse").onclick = () => send({ type: "list" });
+$("closeBrowser").onclick = () => $("browser").style.display = "none";
+
+function showRooms(list) {
+  const ul = $("rooms");
+  ul.innerHTML = "";
+  if (!list.length) { ul.innerHTML = "<li>no rooms yet</li>"; }
+  list.forEach(r => {
+    const li = document.createElement("li");
+    li.textContent = `${r.code}  (${r.n} users)`;
+    li.onclick = () => { send({ type: "join", room: r.code }); $("browser").style.display = "none"; };
+    ul.appendChild(li);
+  });
+  $("browser").style.display = "block";
+}
+// room browser ends here
+
+// remember me starts here
+function saveMe() {
+  try {
+    if ($("remember").checked) localStorage.setItem("me", JSON.stringify(me()));
+    else localStorage.removeItem("me");
+  } catch {}
+}
+try {
+  const saved = JSON.parse(localStorage.getItem("me"));
+  if (saved) { $("name").value = saved.name; $("color").value = saved.color; $("remember").checked = true; }
+} catch {}
+$("remember").onchange = saveMe;
+showColor();
+// remember me ends here
+
+// ui scaling starts here
+const BASE = 780;  // square design size here
+function fit() {   // bigger window, bigger square
+  const s = Math.max(0.6, Math.min(innerWidth, innerHeight) / BASE);
+  const app = $("app");
+  app.style.zoom = s;
+  app.style.left = (innerWidth / s - BASE) / 2 + "px";  // centre the square
+  app.style.top = (innerHeight / s - BASE) / 2 + "px";
+}
+addEventListener("resize", fit);
+fit();
+// ui scaling ends here
+
+connect();
+</script>
+</body>
+</html>
