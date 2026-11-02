@@ -4,5 +4,3 @@ build/
 dist/
 *.spec
 build.bat
-requirements-desktop.txt
-requirements.txt
