@@ -12,7 +12,7 @@ PORT = 8000  # local server port here
 TITLE = "abby's chatroom(s)"  # window title text here
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 ICON = os.path.join(BASE, "static", "icon.ico")
-SERVER = ""  # put railway url here later
+SERVER = "https://chatroom.abbyw.net/"  # put railway url here later
 
 
 def port_open(port):  # is a server already running
