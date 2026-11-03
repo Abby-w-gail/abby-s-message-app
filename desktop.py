@@ -63,5 +63,6 @@ if os.name == "nt":  # own taskbar entry, not python
 # native window opens here
 window = webview.create_window(TITLE, url, width=800, height=830,
                                min_size=(500, 520), background_color="#f4a6c8")
-webview.start(set_icon, window)
+STORE = os.path.join(os.environ.get("APPDATA", BASE), "abbys-chatroom")  # saved data lives here
+webview.start(set_icon, window, private_mode=False, storage_path=STORE)  # keeps remember me
 # desktop app ends here

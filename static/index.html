@@ -321,6 +321,8 @@ try {
   if (saved) { $("name").value = saved.name; $("color").value = saved.color; $("remember").checked = true; }
 } catch {}
 $("remember").onchange = saveMe;
+$("name").addEventListener("input", saveMe);  // save name edits too
+$("color").addEventListener("input", saveMe);  // save colour edits too
 showColor();
 // remember me ends here
 
